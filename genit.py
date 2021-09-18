@@ -65,7 +65,7 @@ banner = f"""
 	 .88                             
  d8888P             
 {color_reset}
-Made by terpi
+https://github.com/terpii/Genit
 
 """
 
