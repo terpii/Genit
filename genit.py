@@ -81,7 +81,7 @@ parser.add_argument('-o', '--output', metavar='path/to/outfile.txt', dest='outpu
 args = parser.parse_args()
 
 
-outputinargs = args.__contains__('output')
+outputinargs = args.output is not None
 
 #debug for only certain verbositys
 def debug3(cmdoutput):
