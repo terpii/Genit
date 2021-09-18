@@ -1,7 +1,5 @@
 #tools that can be installed via apt
-sudo apt install nmap
-sudo apt install nikto
-sudo apt install gobuster
+sudo apt install python3 nmap nikto gobuster
 
 cd /opt/
 sudo git clone https://github.com/offensive-security/exploit-database
