@@ -5,54 +5,19 @@ import errno
 import os
 import pty
 import re
+import requests
 import socket
 import subprocess
 import sys
 from threading import Thread
 from urllib.parse import urlparse
 
-from colorama import Fore, init
-from colorama.ansi import Back
+from lib.debugging import *
+from lib.arg_init import *
+from lib.add_to_host import *
+from lib.outstream import *
+from lib.port_tools.web import *
 
-
-#class for handling command output
-class OutStream:
-	def __init__(self, fileno):
-		self._fileno = fileno
-		self._buffer = b""
-
-	def read_lines(self):
-		try:
-			output = os.read(self._fileno, 1000)
-		except OSError as e:
-			if e.errno != errno.EIO: raise
-			output = b""
-		lines = output.split(b"\n")
-		lines[0] = self._buffer + lines[0] # prepend previous
-										   # non-finished line.
-		if output:
-			self._buffer = lines[-1]
-			finished_lines = lines[:-1]
-			readable = True
-		else:
-			self._buffer = b""
-			if len(lines) == 1 and not lines[0]:
-				# We did not have buffer left, so no output at all.
-				lines = []
-			finished_lines = lines
-			readable = False
-		finished_lines = [line.rstrip(b"\r").decode()
-						  for line in finished_lines]
-		return finished_lines, readable
-
-
-
-
-color_main = Fore.MAGENTA;
-color_reset = Fore.RESET + Back.RESET;
-color_good = Fore.GREEN;
-color_bad = Fore.RED;
-color_info = Fore.LIGHTBLUE_EX;
 
 banner = f"""
 {color_main}
@@ -68,42 +33,6 @@ banner = f"""
 https://github.com/terpii/Genit
 
 """
-
-
-parser = argparse.ArgumentParser("A startup enumeration tool for penetration testing purposes")
-parser.add_argument("-t", '--target' , metavar='127.0.0.1', help="The target to scan", dest="target", required=True)
-parser.add_argument("-v", '--verbose', metavar='1', default="1" , help="a level of verbosity from 0 to 3, with 0 being very quiet", choices=range(4), type=int, dest="verbose")
-parser.add_argument('--noclear', action='store_true', dest='noclear', help="will not clear your terminal on startup")
-parser.add_argument("-f", "--fast", action='store_true', dest='fast', help="will try to focus on speed, faster but not as reliable")
-parser.add_argument('-w', '--wordlist', metavar='/usr/share/wordlists/rockyou.txt', dest='wordlist', help='A wordlist to use when bruteforcing for directories on websites' , required=True , type=argparse.FileType('r'))
-parser.add_argument('-o', '--output', metavar='path/to/outfile.txt', dest='output', help='A File to log all output to', type=argparse.FileType('w', encoding='UTF-8'))
-
-args = parser.parse_args()
-
-
-outputinargs = args.output is not None
-
-#debug for only certain verbositys
-def debug3(cmdoutput):
-	if args.verbose == 3:
-		debug(cmdoutput)
-
-def debug2(cmdoutput):
-	if args.verbose >= 2:
-		debug(cmdoutput)
-
-def debug1(cmdoutput):
-	if args.verbose >= 1:
-		debug(cmdoutput)
-
-#just print but with color reset and log file
-def debug(cmdoutput):
-	print(cmdoutput + color_reset)
-	
-	if outputinargs:
-		file = open(args.output.name, 'a')
-		file.write(cmdoutput + color_reset + '\n')
-		file.close()
 
 
 def newline(count=1):
@@ -135,21 +64,31 @@ def printProgress(threads):
 
 
 
-def handleweb(port):
+def handleweb(port, protocol):
 	debug2(f"handling web on port {port}...")
 
 	threadinfo = f'{color_main}[{port},web]{color_reset}'
 	threads = []
+	
+	# check hostname for htb and add it to the hostfile
+	response = requests.get(f'{protocol}://{args.target}:{port}', allow_redirects=False)
+	domain = response.headers['Location']
+	if domain is not None:
+		if 'https' in domain:#incase it redirects from http to https
+			protocol = 'https'
+		domain = re.search(fr'{protocol}://(.*)/', domain).group(1)
+		debug(f'{threadinfo}Found domain {domain}, adding to /etc/hosts')
+		add_to_host_file(args.target, domain)
 
-	nikto_t = Thread(target=runnikto, args=[port])
+	nikto_t = Thread(target=runnikto, args=[domain,port])
 	nikto_t.daemon = True
-	nikto_t.setName(f"nikto on port {port}")
+	nikto_t.name = f"nikto on port {port}"
 	threads.insert(-1, nikto_t)
 	threads[threads.index(nikto_t)].start()
 
-	gobuster_t = Thread(target=rungobuster, args=[port])
+	gobuster_t = Thread(target=rungobuster, args=[protocol,domain,port])
 	gobuster_t.daemon = True
-	gobuster_t.setName(f"gobuster on port {port}")
+	gobuster_t.name = f"gobuster on port {port}"
 	threads.insert(-1, gobuster_t)
 	threads[threads.index(gobuster_t)].start()
 
@@ -160,73 +99,6 @@ def handleweb(port):
 		thread.join()
 		printProgress(threads)
 	
-def runnikto(port):
-	nikto_pre = f'{color_main}[{port},nikto]{color_reset}'
-
-	cmd = f"nikto -host {args.target} -port {port}"
-
-	debug2(f'{nikto_pre}Starting nikto on port {port}')
-	debug3(f"running command {cmd}...")
-	out_r, out_w = pty.openpty()
-	nikto_p1 = subprocess.Popen(cmd, shell=True, stdout=out_w)
-	
-	f = OutStream(out_r)
-
-	while True:
-		lines, readable = f.read_lines()
-
-		for line in lines:
-			
-			if 'tested' in line:
-				debug(nikto_pre + color_main + line)
-				debug1(f'{nikto_pre}Done!')
-				return
-				
-			#nikto starts good things with a plus, so we mark that as informational
-			if line.startswith('+'):
-				debug(nikto_pre + color_info + line)
-				continue 
-			else:
-				debug(nikto_pre + line)
-		else:#else acts if the for loop hasnt been broke out of, so here it breaks out of both loops
-			continue
-		break
-	return
-
-def rungobuster(port):
-	gobusterpre = f'{color_main}[{port},gobuster]{color_reset}'
-
-	cmd = f'gobuster -w {args.wordlist.name} -u http://{args.target}:{port} -e -np -x txt,html,php,js'
-
-	debug2(f'{gobusterpre}Starting gobuster on port {port}...')
-	debug3(f'running command {cmd}...')
-
-	out_r , out_w = pty.openpty()
-	gobuster_p1 = subprocess.Popen(cmd, shell=True, stdout=out_w)
-
-	f = OutStream(out_r)
-
-	while True:
-		lines , readable = f.read_lines()
-
-		for line in lines:
-			if line.startswith('http'):
-				debug(gobusterpre + color_info + line + ' found')
-				continue
-			if 'Finished' in line:
-				break
-		else:
-			continue
-		break
-					
-
-	debug1(f'{gobusterpre}Done!')
-	return
-
-				
-
-
-
 
 #doing scripts for a port
 def handleport(port):
@@ -337,9 +209,12 @@ def handleport(port):
 
 	#handling websites
 	if 'http' in portdetails.lower():
-		thread = Thread(target=handleweb, args=[port])
+		protocol = 'http'
+		if 'https' in portdetails.lower():
+			protocol = 'https'
+		thread = Thread(target=handleweb, args=[port,protocol])
 		thread.daemon = True
-		thread.setName(f"web on port {port}")
+		thread.name = f"web on port {port}"
 		threads.insert(-1, thread)
 		threads[threads.index(thread)].start()
 		#we dont need the variable anymore, its in the array
@@ -398,7 +273,7 @@ def handleport(port):
 	#wait for threads to finish
 	for thread in threads:
 		thread.join()
-		debug1(threadinfo + thread.getName() + ' Finished')
+		debug1(threadinfo + thread.name + ' Finished')
 		printProgress(threads)
 
 
@@ -479,7 +354,7 @@ def main():
 				#creating a thread
 				t = Thread(target=handleport, args=[port])
 				t.daemoen = True
-				t.setName(f"Port {port}")
+				t.name = f"Port {port}"
 				threads.insert(t_current_iterator , t)
 				threads[t_current_iterator].start()
 				t_current_iterator += 1
@@ -496,7 +371,7 @@ def main():
 
 	for thread in threads:
 		thread.join()
-		debug(f"{color_good}{thread.getName()} Finished (main)")
+		debug(f"{color_good}{thread.name} Finished (main)")
 
 		
 		if args.verbose >= 1:#save a tiny bit of resources if debug is set to 0

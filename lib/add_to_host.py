@@ -1,7 +1,7 @@
 
-def add_to_host_file(host, ip):
-	with open('/etc/hosts') as f:
+def add_to_host_file(ip, host):
+	with open('/etc/hosts', 'a+') as f:
 		if host in f.read():
 			return
-		f.write(f'\n{ip} {host}')
+		f.write(f'{ip} {host}\n')
 
