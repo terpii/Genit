@@ -1,6 +1,7 @@
 # Genit
 
 Genit is a penetration testing tool that runs basic enumerations for you
+This tool is made primarly for HackTheBox machines
 
 ## Installation
 
