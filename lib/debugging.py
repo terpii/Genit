@@ -1,5 +1,6 @@
 from colorama import Fore, init
 from colorama.ansi import Back
+from lib.arg_init import args
 
 
 #debug for only certain verbositys
@@ -19,7 +20,7 @@ def debug1(cmdoutput):
 def debug(cmdoutput):
 	print(cmdoutput + color_reset)
 	
-	if outputinargs:
+	if args.output is not None:
 		file = open(args.output.name, 'a')
 		file.write(cmdoutput + color_reset + '\n')
 		file.close()

@@ -1,8 +1,13 @@
+from lib.debugging import *
+from lib.arg_init import *
+from lib.outstream import *
+import pty
+import subprocess
 
-def runnikto(port):
+def runnikto(domain, port):
 	nikto_pre = f'{color_main}[{port},nikto]{color_reset}'
 
-	cmd = f"nikto -host {args.target} -port {port}"
+	cmd = f"nikto -host {domain} -port {port}"
 
 	debug2(f'{nikto_pre}Starting nikto on port {port}')
 	debug3(f"running command {cmd}...")
@@ -32,10 +37,10 @@ def runnikto(port):
 		break
 	return
 
-def rungobuster(port):
+def rungobuster(protocol, domain, port):
 	gobusterpre = f'{color_main}[{port},gobuster]{color_reset}'
 
-	cmd = f'gobuster -w {args.wordlist.name} -u http://{args.target}:{port} -e -np -x txt,html,php,js'
+	cmd = f'gobuster dir --wordlist {args.wordlist.name} --url "{protocol}://{domain}:{port}" -x txt,php,html,js'
 
 	debug2(f'{gobusterpre}Starting gobuster on port {port}...')
 	debug3(f'running command {cmd}...')
@@ -46,6 +51,8 @@ def rungobuster(port):
 	f = OutStream(out_r)
 
 	while True:
+		if gobuster_p1.poll() is not None:
+			break
 		lines , readable = f.read_lines()
 
 		for line in lines:
