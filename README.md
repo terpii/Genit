@@ -12,9 +12,12 @@ This tool is made primarly for HackTheBox machines
 
 On Kali Linux you should be able to run the tool right away
 
-Otherwise run the builtin install.sh script:
-`chmod +x install.sh`
-`sudo ./install.sh`
+Otherwise you will need the following depencies:
+`gobuster`
+`nmap`
+`ffuf`
+`nikto`
+`searchsploit`
 
 ## Usage
 
