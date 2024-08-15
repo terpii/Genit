@@ -67,7 +67,33 @@ def rungobuster(protocol, domain, port):
 					
 
 	debug1(f'{gobusterpre}Done!')
-	return
 
-				
+def enum_subdomains(protocol, domain, port):
+	assert args.subdomainlist is not None, 'subdomain wordlist not set'
+	subdomains_pre = f'{color_main}[{port},subdomains]{color_reset}'
 
+	cmd = f'ffuf -u {protocol}://{domain}:{port}/ -H "Host: FUZZ.{domain}" -w {args.subdomainlist.name} -mc all -fc 302 2>/dev/null'
+
+	debug2(f'{subdomains_pre}Fuzzing for subdomains on port {port}...')
+	debug3(f'{subdomains_pre}running command: {cmd}')
+
+	out_r , out_w = pty.openpty()
+	ffuf_p1 = subprocess.Popen(cmd, shell=True, stdout=out_w, stderr=subprocess.DEVNULL)
+
+	f = OutStream(out_r)
+
+	while True:
+		if ffuf_p1.poll() is not None:
+			break
+		lines , readable = f.read_lines()
+
+		for line in lines:
+			if 'Status' in line and 'Size' in line:
+				debug(f'{subdomains_pre}{color_info}{line}')
+				continue
+		else:
+			continue
+		break
+					
+
+	debug1(f'{subdomains_pre}Done!')

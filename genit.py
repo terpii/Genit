@@ -71,14 +71,19 @@ def handleweb(port, protocol):
 	threads = []
 	
 	# check hostname for htb and add it to the hostfile
+	hasdomain = False
 	response = requests.get(f'{protocol}://{args.target}:{port}', allow_redirects=False)
-	domain = response.headers['Location']
-	if domain is not None:
+	try:
+		domain = response.headers['Location']
+
 		if 'https' in domain:#incase it redirects from http to https
 			protocol = 'https'
 		domain = re.search(fr'{protocol}://(.*)/', domain).group(1)
 		debug(f'{threadinfo}Found domain {domain}, adding to /etc/hosts')
 		add_to_host_file(args.target, domain)
+		hasdomain = True
+	except KeyError:
+		domain = args.target
 
 	nikto_t = Thread(target=runnikto, args=[domain,port])
 	nikto_t.daemon = True
@@ -91,8 +96,13 @@ def handleweb(port, protocol):
 	gobuster_t.name = f"gobuster on port {port}"
 	threads.insert(-1, gobuster_t)
 	threads[threads.index(gobuster_t)].start()
-
-
+	
+	if hasdomain:
+		subdomain_t = Thread(target=enum_subdomains, args=[protocol,domain,port])
+		subdomain_t.daemon = True
+		subdomain_t.name = f"gobuster on port {port}"
+		threads.insert(-1, subdomain_t)
+		threads[threads.index(subdomain_t)].start()
 
 	#waiting for threads to finish
 	for thread in threads:
@@ -112,7 +122,7 @@ def handleport(port):
 	nmapcmds = {
 		0 : f"nmap -sC -sV  -p {port} {args.target}",
 		1 : f"nmap -sC -sV  -p {port} {args.target}",
-		2 : f"nmap -sC -sV -v -p {port} {args.target} | grep -vE '^\Host is up|Read data files from|Service detection performed|Initiating|Completed|adjust_timeouts2|Discovered open port'",
+		2 : f"nmap -sC -sV -v -p {port} {args.target} | grep -vE '^\\Host is up|Read data files from|Service detection performed|Initiating|Completed|adjust_timeouts2|Discovered open port'",
 		3 : f"nmap -v -sC -sV -p {port} {args.target}"
 	}
 	
@@ -199,6 +209,7 @@ def handleport(port):
 					import unicodedata
 					unicodedata.numeric(letter)
 					version = word
+					version = version.replace('(','').replace(')','')#fixes issue with openssh version string
 					break
 				except (TypeError, ValueError):
 					pass
@@ -223,12 +234,12 @@ def handleport(port):
 	debug2(f"{threadinfo}Identified service: {main_service} {version}")
 
 	#searching for exploits using searchsploit
-	#theres lots of repetition here and im to lazy to fix
-	if version is not "":
+	#theres lots of repetition here and im too lazy to fix
+	if version != "":
 		debug(f"{threadinfo}{color_info}Duckduckgo search page: https://duckduckgo.com/?q={main_service}+{version}+vulnerability")
 
 		debug3(f"{threadinfo}Running command 'searchsploit {main_service} -v {version}'....")
-		expl_proc = subprocess.Popen(f"searchsploit {main_service} -v {version}", stdout=subprocess.PIPE, shell=True)
+		expl_proc = subprocess.Popen(f"searchsploit {main_service} -v {version}", stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, shell=True)
 
 		(output, err) = expl_proc.communicate()
 
@@ -240,18 +251,21 @@ def handleport(port):
 			if not (" | " and "/" in expl):
 				continue
 			expl_count += 1
+			
+			if expl_count > 5:#concat to only 5 exploits
+				continue
 
 			debug(f'{threadinfo}{color_good}Exploit found: {expl}')
 
 		if expl_count > 0:
-			debug2(f"{threadinfo}{color_info}{expl_count} Exploits found")
+			debug1(f"{threadinfo}{color_info}{expl_count} Exploits found, 5 have been shown")
 		else:
 			debug1(f"{threadinfo}{color_info}No exploits found")
 	else:
 		debug(f"{threadinfo}{color_info}Duckduckgo search page: https://duckduckgo.com/?q={main_service}+vulnerability")
 		debug3(f"{threadinfo}Running command 'searchsploit {main_service}'....")
 
-		expl_proc = subprocess.Popen(f"searchsploit '{main_service}'", stdout=subprocess.PIPE, shell=True)
+		expl_proc = subprocess.Popen(f"searchsploit '{main_service}'", stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, shell=True)
 
 		(output, err) = expl_proc.communicate()
 
@@ -263,10 +277,14 @@ def handleport(port):
 			if not (" | " and "/" in expl):
 				continue
 			expl_count += 1
+
+			if expl_count > 5:#concat to only 5 exploits
+				continue
+
 			debug(f'{threadinfo}{color_info}Exploit found: {expl}')
 
 		if expl_count > 0:
-			debug2(f"{threadinfo}{color_info}{expl_count} Exploits found")
+			debug1(f"{threadinfo}{color_info}{expl_count} Exploits found, 5 have been shown")
 		else:
 			debug1(f"{threadinfo}{color_info}No exploits found")
 
@@ -326,9 +344,9 @@ def main():
 
 	#different commands for each verbosity
 	nmapverbositydict = {
-		0 : f"nmap -sS -p- -v {ip} | grep -vE '^\Starting|Scanning|Completed|Initiating|is up|shown|report|Read|done|Raw packets sent'",
-		1 : f"nmap -sS -p- -v {ip} | grep -vE '^\Starting|Scanning|Completed|Initiating|is up|shown|report|Read|done'",
-		2 : f"nmap -sS -p- -v {ip} | grep -vE '^\Starting|Scanning|Completed|Initiating|shown|report|Read|done'",
+		0 : f"nmap -sS -p- -v {ip} | grep -vE '^\\Starting|Scanning|Completed|Initiating|is up|shown|report|Read|done|Raw packets sent'",
+		1 : f"nmap -sS -p- -v {ip} | grep -vE '^\\Starting|Scanning|Completed|Initiating|is up|shown|report|Read|done'",
+		2 : f"nmap -sS -p- -v {ip} | grep -vE '^\\Starting|Scanning|Completed|Initiating|shown|report|Read|done'",
 		3 : f"nmap -sS -p- -v {ip}"
 	}
 
